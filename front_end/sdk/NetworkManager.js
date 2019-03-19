@@ -229,7 +229,7 @@ SDK.NetworkManager.Conditions;
 
 /** @type {!SDK.NetworkManager.Conditions} */
 SDK.NetworkManager.NoThrottlingConditions = {
-  title: Common.UIString('Online'),
+  title: Common.UIString('No throttling'),
   download: -1,
   upload: -1,
   latency: 0
@@ -841,8 +841,16 @@ SDK.NetworkDispatcher = class {
   _finishNetworkRequest(networkRequest, finishTime, encodedDataLength, shouldReportCorbBlocking) {
     networkRequest.endTime = finishTime;
     networkRequest.finished = true;
-    if (encodedDataLength >= 0)
-      networkRequest.setTransferSize(encodedDataLength);
+    if (encodedDataLength >= 0) {
+      const redirectSource = networkRequest.redirectSource();
+      if (redirectSource && redirectSource.signedExchangeInfo()) {
+        networkRequest.setTransferSize(0);
+        redirectSource.setTransferSize(encodedDataLength);
+        this._updateNetworkRequest(redirectSource);
+      } else {
+        networkRequest.setTransferSize(encodedDataLength);
+      }
+    }
     this._manager.dispatchEventToListeners(SDK.NetworkManager.Events.RequestFinished, networkRequest);
     delete this._inflightRequestsById[networkRequest.requestId()];
     delete this._inflightRequestsByURL[networkRequest.url()];
@@ -886,7 +894,7 @@ SDK.NetworkDispatcher = class {
 };
 
 /**
- * @implements {SDK.TargetManager.Observer}
+ * @implements {SDK.SDKModelObserver<!SDK.NetworkManager>}
  * @unrestricted
  */
 SDK.MultitargetNetworkManager = class extends Common.Object {
@@ -911,7 +919,7 @@ SDK.MultitargetNetworkManager = class extends Common.Object {
     /** @type {!Multimap<!SDK.MultitargetNetworkManager.RequestInterceptor, !SDK.MultitargetNetworkManager.InterceptionPattern>} */
     this._urlsForRequestInterceptor = new Multimap();
 
-    SDK.targetManager.observeTargets(this, SDK.Target.Capability.Network);
+    SDK.targetManager.observeModels(SDK.NetworkManager, this);
   }
 
   /**
@@ -929,10 +937,10 @@ SDK.MultitargetNetworkManager = class extends Common.Object {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.NetworkManager} networkManager
    */
-  targetAdded(target) {
-    const networkAgent = target.networkAgent();
+  modelAdded(networkManager) {
+    const networkAgent = networkManager.target().networkAgent();
     if (this._extraHeaders)
       networkAgent.setExtraHTTPHeaders(this._extraHeaders);
     if (this._currentUserAgent())
@@ -948,16 +956,16 @@ SDK.MultitargetNetworkManager = class extends Common.Object {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.NetworkManager} networkManager
    */
-  targetRemoved(target) {
+  modelRemoved(networkManager) {
     for (const entry of this._inflightMainResourceRequests) {
       const manager = SDK.NetworkManager.forRequest(/** @type {!SDK.NetworkRequest} */ (entry[1]));
-      if (manager.target() !== target)
+      if (manager !== networkManager)
         continue;
       this._inflightMainResourceRequests.delete(/** @type {string} */ (entry[0]));
     }
-    this._agents.delete(target.networkAgent());
+    this._agents.delete(networkManager.target().networkAgent());
   }
 
   /**

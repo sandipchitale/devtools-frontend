@@ -428,6 +428,25 @@ Resources.IndexedDBModel = class extends SDK.SDKModel {
   }
 
   /**
+   * @param {!Resources.IndexedDBModel.DatabaseId} databaseId
+   * @param {!Resources.IndexedDBModel.ObjectStore} objectStore
+   * @return {!Promise<?Resources.IndexedDBModel.ObjectStoreMetadata>}
+   */
+  async getMetadata(databaseId, objectStore) {
+    const databaseOrigin = databaseId.securityOrigin;
+    const databaseName = databaseId.name;
+    const objectStoreName = objectStore.name;
+    const response =
+        await this._indexedDBAgent.invoke_getMetadata({securityOrigin: databaseOrigin, databaseName, objectStoreName});
+
+    if (response[Protocol.Error]) {
+      console.error('IndexedDBAgent error: ' + response[Protocol.Error]);
+      return null;
+    }
+    return {entriesCount: response.entriesCount, keyGeneratorValue: response.keyGeneratorValue};
+  }
+
+  /**
    * @param {string} securityOrigin
    */
   async _refreshDatabaseList(securityOrigin) {
@@ -581,6 +600,14 @@ Resources.IndexedDBModel.ObjectStore = class {
         Resources.IndexedDBModel.keyPathStringFromIDBKeyPath(/** @type {string}*/ (this.keyPath)));
   }
 };
+
+/**
+ * @typedef {{
+ *      entriesCount: number,
+ *      keyGeneratorValue: number
+ * }}
+ */
+Resources.IndexedDBModel.ObjectStoreMetadata;
 
 /**
  * @unrestricted

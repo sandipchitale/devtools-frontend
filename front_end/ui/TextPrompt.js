@@ -42,7 +42,7 @@ UI.TextPrompt = class extends Common.Object {
     this._title = '';
     this._queryRange = null;
     this._previousText = '';
-    this._currentSuggestion = '';
+    this._currentSuggestion = null;
     this._completionRequestId = 0;
     this._ghostTextElement = createElementWithClass('span', 'auto-complete-text');
     this._ghostTextElement.setAttribute('contenteditable', 'false');
@@ -110,12 +110,11 @@ UI.TextPrompt = class extends Common.Object {
     this._boundOnMouseWheel = this.onMouseWheel.bind(this);
     this._boundClearAutocomplete = this.clearAutocomplete.bind(this);
     this._proxyElement = element.ownerDocument.createElement('span');
-    const shadowRoot = UI.createShadowRootWithCoreStyles(this._proxyElement, 'ui/textPrompt.css');
-    this._contentElement = shadowRoot.createChild('div', 'text-prompt-root');
-    this._contentElement.createChild('content');
+    UI.appendStyle(this._proxyElement, 'ui/textPrompt.css');
+    this._contentElement = this._proxyElement.createChild('div', 'text-prompt-root');
     this._proxyElement.style.display = this._proxyElementDisplay;
     element.parentElement.insertBefore(this._proxyElement, element);
-    this._proxyElement.appendChild(element);
+    this._contentElement.appendChild(element);
     this._element.classList.add('text-prompt');
     UI.ARIAUtils.markAsTextBox(this._element);
     this._element.setAttribute('contenteditable', 'plaintext-only');
@@ -151,8 +150,8 @@ UI.TextPrompt = class extends Common.Object {
     const text = this.text();
     if (!this._queryRange)
       return text;
-    return text.substring(0, this._queryRange.startColumn) + this._currentSuggestion +
-        text.substring(this._queryRange.endColumn);
+    const suggestion = this._currentSuggestion ? this._currentSuggestion.text : '';
+    return text.substring(0, this._queryRange.startColumn) + suggestion + text.substring(this._queryRange.endColumn);
   }
 
   /**
@@ -274,7 +273,7 @@ UI.TextPrompt = class extends Common.Object {
    */
   onKeyDown(event) {
     let handled = false;
-    if (this._isSuggestBoxVisible() && this._suggestBox.keyPressed(event)) {
+    if (this.isSuggestBoxVisible() && this._suggestBox.keyPressed(event)) {
       event.consume(true);
       return;
     }
@@ -299,7 +298,7 @@ UI.TextPrompt = class extends Common.Object {
           this.clearAutocomplete();
         break;
       case 'Escape':
-        if (this._isSuggestBoxVisible()) {
+        if (this.isSuggestBoxVisible()) {
           this.clearAutocomplete();
           handled = true;
         }
@@ -311,6 +310,7 @@ UI.TextPrompt = class extends Common.Object {
         }
         break;
     }
+
     if (isEnterKey(event))
       event.preventDefault();
 
@@ -319,13 +319,32 @@ UI.TextPrompt = class extends Common.Object {
   }
 
   /**
+   * @param {string} key
+   * @return {boolean}
+   */
+  _acceptSuggestionOnStopCharacters(key) {
+    if (!this._currentSuggestion || !this._queryRange || key.length !== 1 ||
+        !this._completionStopCharacters.includes(key))
+      return false;
+
+    const query = this.text().substring(this._queryRange.startColumn, this._queryRange.endColumn);
+    if (query && this._currentSuggestion.text.startsWith(query + key)) {
+      this._queryRange.endColumn += 1;
+      return this.acceptAutoComplete();
+    }
+    return false;
+  }
+
+  /**
    * @param {!Event} event
    */
   onInput(event) {
     const text = this.text();
-    const hasCommonPrefix = text.startsWith(this._previousText) || this._previousText.startsWith(text);
-    if (this._queryRange && hasCommonPrefix)
-      this._queryRange.endColumn += text.length - this._previousText.length;
+    if (event.data && !this._acceptSuggestionOnStopCharacters(event.data)) {
+      const hasCommonPrefix = text.startsWith(this._previousText) || this._previousText.startsWith(text);
+      if (this._queryRange && hasCommonPrefix)
+        this._queryRange.endColumn += text.length - this._previousText.length;
+    }
     this._refreshGhostText();
     this._previousText = text;
     this.dispatchEventToListeners(UI.TextPrompt.Events.TextChanged);
@@ -338,7 +357,7 @@ UI.TextPrompt = class extends Common.Object {
    */
   acceptAutoComplete() {
     let result = false;
-    if (this._isSuggestBoxVisible())
+    if (this.isSuggestBoxVisible())
       result = this._suggestBox.acceptSuggestion();
     if (!result)
       result = this._acceptSuggestionInternal();
@@ -349,7 +368,7 @@ UI.TextPrompt = class extends Common.Object {
   clearAutocomplete() {
     const beforeText = this.textWithCurrentSuggestion();
 
-    if (this._isSuggestBoxVisible())
+    if (this.isSuggestBoxVisible())
       this._suggestBox.hide();
     this._clearAutocompleteTimeout();
     this._queryRange = null;
@@ -361,9 +380,9 @@ UI.TextPrompt = class extends Common.Object {
 
   _refreshGhostText() {
     if (this._queryRange && this._currentSuggestion && this._isCaretAtEndOfPrompt() &&
-        this._currentSuggestion.startsWith(this.text().substring(this._queryRange.startColumn))) {
+        this._currentSuggestion.text.startsWith(this.text().substring(this._queryRange.startColumn))) {
       this._ghostTextElement.textContent =
-          this._currentSuggestion.substring(this._queryRange.endColumn - this._queryRange.startColumn);
+          this._currentSuggestion.text.substring(this._queryRange.endColumn - this._queryRange.startColumn);
       this._element.appendChild(this._ghostTextElement);
     } else {
       this._ghostTextElement.remove();
@@ -382,7 +401,7 @@ UI.TextPrompt = class extends Common.Object {
    * @param {boolean=} force
    */
   autoCompleteSoon(force) {
-    const immediately = this._isSuggestBoxVisible() || force;
+    const immediately = this.isSuggestBoxVisible() || force;
     if (!this._completeTimeout) {
       this._completeTimeout =
           setTimeout(this.complete.bind(this, force), immediately ? 0 : this._autocompletionTimeout);
@@ -401,7 +420,7 @@ UI.TextPrompt = class extends Common.Object {
 
     let shouldExit;
 
-    if (!force && !this._isCaretAtEndOfPrompt() && !this._isSuggestBoxVisible())
+    if (!force && !this._isCaretAtEndOfPrompt() && !this.isSuggestBoxVisible())
       shouldExit = true;
     else if (!selection.isCollapsed)
       shouldExit = true;
@@ -416,7 +435,7 @@ UI.TextPrompt = class extends Common.Object {
 
     const expressionRange = wordQueryRange.cloneRange();
     expressionRange.collapse(true);
-    expressionRange.setStartBefore(this._proxyElement);
+    expressionRange.setStartBefore(this._element);
     const completionRequestId = ++this._completionRequestId;
     const completions = await this._loadCompletions(expressionRange.toString(), wordQueryRange.toString(), !!force);
     this._completionsReady(completionRequestId, selection, wordQueryRange, !!force, completions);
@@ -512,7 +531,7 @@ UI.TextPrompt = class extends Common.Object {
 
   /**
    * @override
-   * @param {string} suggestion
+   * @param {?UI.SuggestBox.Suggestion} suggestion
    * @param {boolean=} isIntermediateSuggestion
    */
   applySuggestion(suggestion, isIntermediateSuggestion) {
@@ -536,10 +555,11 @@ UI.TextPrompt = class extends Common.Object {
     if (!this._queryRange)
       return false;
 
+    const selectionRange = this._currentSuggestion ? this._currentSuggestion.selectionRange : null;
+    const endColumn = selectionRange ? selectionRange.endColumn : this._currentSuggestion.text.length;
+    const startColumn = selectionRange ? selectionRange.startColumn : this._currentSuggestion.text.length;
     this._element.textContent = this.textWithCurrentSuggestion();
-    this.setDOMSelection(
-        this._queryRange.startColumn + this._currentSuggestion.length,
-        this._queryRange.startColumn + this._currentSuggestion.length);
+    this.setDOMSelection(this._queryRange.startColumn + startColumn, this._queryRange.startColumn + endColumn);
 
     this.clearAutocomplete();
     this.dispatchEventToListeners(UI.TextPrompt.Events.TextChanged);
@@ -565,9 +585,10 @@ UI.TextPrompt = class extends Common.Object {
   }
 
   /**
+   * @protected
    * @return {boolean}
    */
-  _isSuggestBoxVisible() {
+  isSuggestBoxVisible() {
     return this._suggestBox && this._suggestBox.visible();
   }
 

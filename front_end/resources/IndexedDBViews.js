@@ -125,7 +125,8 @@ Resources.IDBDataView = class extends UI.SimpleView {
     this._clearButton = new UI.ToolbarButton(Common.UIString('Clear object store'), 'largeicon-clear');
     this._clearButton.addEventListener(UI.ToolbarButton.Events.Click, this._clearButtonClicked, this);
 
-    this._needsRefresh = new UI.ToolbarItem(UI.createLabel(Common.UIString('Data may be stale'), 'smallicon-warning'));
+    this._needsRefresh =
+        new UI.ToolbarItem(UI.createIconLabel(Common.UIString('Data may be stale'), 'smallicon-warning'));
     this._needsRefresh.setVisible(false);
     this._needsRefresh.setTitle(Common.UIString('Some entries may have been modified'));
 
@@ -209,8 +210,6 @@ Resources.IDBDataView = class extends UI.SimpleView {
     const editorToolbar = new UI.Toolbar('data-view-toolbar', this.element);
 
     editorToolbar.appendToolbarItem(this._refreshButton);
-    editorToolbar.appendToolbarItem(this._clearButton);
-    editorToolbar.appendToolbarItem(this._deleteSelectedButton);
 
     editorToolbar.appendToolbarItem(new UI.ToolbarSeparator());
 
@@ -223,13 +222,12 @@ Resources.IDBDataView = class extends UI.SimpleView {
     this._pageForwardButton.addEventListener(UI.ToolbarButton.Events.Click, this._pageForwardButtonClicked, this);
     editorToolbar.appendToolbarItem(this._pageForwardButton);
 
-    this._keyInputElement = UI.createInput('toolbar-input');
-    editorToolbar.appendToolbarItem(new UI.ToolbarItem(this._keyInputElement));
-    this._keyInputElement.placeholder = Common.UIString('Start from key');
-    this._keyInputElement.addEventListener('paste', this._keyInputChanged.bind(this), false);
-    this._keyInputElement.addEventListener('cut', this._keyInputChanged.bind(this), false);
-    this._keyInputElement.addEventListener('keypress', this._keyInputChanged.bind(this), false);
-    this._keyInputElement.addEventListener('keydown', this._keyInputChanged.bind(this), false);
+    this._keyInput = new UI.ToolbarInput(ls`Start from key`, 0.5);
+    this._keyInput.addEventListener(UI.ToolbarInput.Event.TextChanged, this._updateData.bind(this, false));
+    editorToolbar.appendToolbarItem(this._keyInput);
+    editorToolbar.appendToolbarItem(new UI.ToolbarSeparator());
+    editorToolbar.appendToolbarItem(this._clearButton);
+    editorToolbar.appendToolbarItem(this._deleteSelectedButton);
 
     editorToolbar.appendToolbarItem(this._needsRefresh);
   }
@@ -248,10 +246,6 @@ Resources.IDBDataView = class extends UI.SimpleView {
   _pageForwardButtonClicked(event) {
     this._skipCount = this._skipCount + this._pageSize;
     this._updateData(false);
-  }
-
-  _keyInputChanged() {
-    window.setTimeout(this._updateData.bind(this, false), 0);
   }
 
   refreshData() {
@@ -292,7 +286,7 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @param {boolean} force
    */
   _updateData(force) {
-    const key = this._parseKey(this._keyInputElement.value);
+    const key = this._parseKey(this._keyInput.value());
     const pageSize = this._pageSize;
     let skipCount = this._skipCount;
     let selected = this._dataGrid.selectedNode ? this._dataGrid.selectedNode.data['number'] : 0;
@@ -351,6 +345,28 @@ Resources.IDBDataView = class extends UI.SimpleView {
     } else {
       this._model.loadObjectStoreData(
           this._databaseId, this._objectStore.name, idbKeyRange, skipCount, pageSize, callback.bind(this));
+    }
+    this._model.getMetadata(this._databaseId, this._objectStore).then(this._updateSummaryBar.bind(this));
+  }
+
+  /**
+   * @param {?Resources.IndexedDBModel.ObjectStoreMetadata} metadata
+   */
+  _updateSummaryBar(metadata) {
+    if (!this._summaryBarElement)
+      this._summaryBarElement = this.element.createChild('div', 'object-store-summary-bar');
+    this._summaryBarElement.removeChildren();
+    if (!metadata)
+      return;
+
+    const separator = '\u2002\u2758\u2002';
+
+    const span = this._summaryBarElement.createChild('span');
+    span.textContent = ls`Total entries: ${String(metadata.entriesCount)}`;
+
+    if (this._objectStore.autoIncrement) {
+      span.textContent += separator;
+      span.textContent += ls`Key generator value: ${String(metadata.keyGeneratorValue)}`;
     }
   }
 

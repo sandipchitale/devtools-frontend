@@ -38,15 +38,16 @@ ServiceDispatcher = class {
    * @param {string} data
    */
   _dispatchMessageWrapped(data) {
+    let message;
     try {
-      const message = JSON.parse(data);
+      message = JSON.parse(data);
       if (!(message instanceof Object)) {
         this._sendErrorResponse(message['id'], 'Malformed message');
         return;
       }
       this._dispatchMessage(message);
     } catch (e) {
-      this._sendErrorResponse(message['id'], e.toString() + ' ' + e.stack);
+      this._sendErrorResponse(message ? message['id'] : '', e.toString() + ' ' + e.stack);
     }
   }
 

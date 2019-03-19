@@ -365,7 +365,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
       return 1;
     if (aRequest.cached() && !bRequest.cached())
       return -1;
-    return (aRequest.transferSize - bRequest.transferSize) || aRequest.indentityCompare(bRequest);
+    return (aRequest.transferSize - bRequest.transferSize) || (aRequest.resourceSize - bRequest.resourceSize) ||
+        aRequest.indentityCompare(bRequest);
   }
 
   /**
@@ -780,7 +781,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @return {boolean}
    */
   _isFailed() {
-    return (this._request.failed && !this._request.statusCode) || (this._request.statusCode >= 400);
+    return (this._request.failed && !this._request.statusCode) || (this._request.statusCode >= 400) ||
+        (!!this._request.signedExchangeInfo() && !!this._request.signedExchangeInfo().errors);
   }
 
   /**
@@ -951,24 +953,32 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @param {!Element} cell
    */
   _renderSizeCell(cell) {
-    if (this._request.fetchedViaServiceWorker) {
-      this._setTextAndTitle(cell, Common.UIString('(from ServiceWorker)'));
+    const resourceSize = Number.bytesToString(this._request.resourceSize);
+
+    if (this._request.cachedInMemory()) {
+      cell.createTextChild(ls`(memory cache)`);
+      cell.title = ls`Served from memory cache, resource size: ${resourceSize}`;
       cell.classList.add('network-dim-cell');
-    } else if (this._request.redirectSource() && this._request.redirectSource().signedExchangeInfo()) {
-      this._setTextAndTitle(cell, Common.UIString('(from signed-exchange)'));
+    } else if (this._request.fetchedViaServiceWorker) {
+      cell.createTextChild(ls`(ServiceWorker)`);
+      cell.title = ls`Served from ServiceWorker, resource size: ${resourceSize}`;
+      cell.classList.add('network-dim-cell');
+    } else if (
+        this._request.redirectSource() && this._request.redirectSource().signedExchangeInfo() &&
+        !this._request.redirectSource().signedExchangeInfo().errors) {
+      cell.createTextChild(ls`(signed-exchange)`);
+      cell.title = ls`Served from Signed HTTP Exchange, resource size: ${resourceSize}`;
       cell.classList.add('network-dim-cell');
     } else if (this._request.cached()) {
-      if (this._request.cachedInMemory())
-        this._setTextAndTitle(cell, Common.UIString('(from memory cache)'));
-      else
-        this._setTextAndTitle(cell, Common.UIString('(from disk cache)'));
+      cell.createTextChild(ls`(disk cache)`);
+      cell.title = ls`Served from disk cache, resource size: ${resourceSize}`;
       cell.classList.add('network-dim-cell');
     } else {
-      const resourceSize = Number.bytesToString(this._request.resourceSize);
       const transferSize = Number.bytesToString(this._request.transferSize);
-      this._setTextAndTitle(cell, transferSize);
-      this._appendSubtitle(cell, resourceSize);
+      cell.createTextChild(transferSize);
+      cell.title = `${transferSize} transferred over network, resource size: ${resourceSize}`;
     }
+    this._appendSubtitle(cell, resourceSize);
   }
 
   /**

@@ -36,6 +36,11 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
 
     const quota = this._reportView.appendSection(Common.UIString('Usage'));
     this._quotaRow = quota.appendRow();
+    const learnMoreRow = quota.appendRow();
+    const learnMore = UI.XLink.create(
+        'https://developers.google.com/web/tools/chrome-devtools/progressive-web-apps#opaque-responses',
+        ls`Learn more`);
+    learnMoreRow.appendChild(learnMore);
     this._quotaUsage = null;
     this._pieChart = new PerfUI.PieChart(110, Number.bytesToString, true);
     this._pieChartLegend = createElement('div');
@@ -43,6 +48,10 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
     usageBreakdownRow.classList.add('usage-breakdown-row');
     usageBreakdownRow.appendChild(this._pieChart.element);
     usageBreakdownRow.appendChild(this._pieChartLegend);
+
+    const clearButtonSection = this._reportView.appendSection('', 'clear-storage-button').appendRow();
+    this._clearButton = UI.createTextButton(ls`Clear site data`, this._clear.bind(this));
+    clearButtonSection.appendChild(this._clearButton);
 
     const application = this._reportView.appendSection(Common.UIString('Application'));
     this._appendItem(application, Common.UIString('Unregister service workers'), 'service_workers');
@@ -57,11 +66,7 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
     this._appendItem(caches, Common.UIString('Cache storage'), 'cache_storage');
     this._appendItem(caches, Common.UIString('Application cache'), 'appcache');
 
-    SDK.targetManager.observeTargets(this, SDK.Target.Capability.Browser);
-    const footer = this._reportView.appendSection('', 'clear-storage-button').appendRow();
-    this._clearButton = UI.createTextButton(
-        Common.UIString('Clear site data'), this._clear.bind(this), Common.UIString('Clear site data'));
-    footer.appendChild(this._clearButton);
+    SDK.targetManager.observeTargets(this);
   }
 
   /**
@@ -83,7 +88,8 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
       return;
     this._target = target;
     const securityOriginManager = target.model(SDK.SecurityOriginManager);
-    this._updateOrigin(securityOriginManager.mainSecurityOrigin());
+    this._updateOrigin(
+        securityOriginManager.mainSecurityOrigin(), securityOriginManager.unreachableMainSecurityOrigin());
     securityOriginManager.addEventListener(
         SDK.SecurityOriginManager.Events.MainSecurityOriginChanged, this._originChanged, this);
   }
@@ -104,16 +110,24 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
    * @param {!Common.Event} event
    */
   _originChanged(event) {
-    const origin = /** *@type {string} */ (event.data);
-    this._updateOrigin(origin);
+    const mainOrigin = /** *@type {string} */ (event.data.mainSecurityOrigin);
+    const unreachableMainOrigin = /** @type {string} */ (event.data.unreachableMainSecurityOrigin);
+    this._updateOrigin(mainOrigin, unreachableMainOrigin);
   }
 
   /**
-   * @param {string} url
+   * @param {string} mainOrigin
+   * @param {string} unreachableMainOrigin
    */
-  _updateOrigin(url) {
-    this._securityOrigin = new Common.ParsedURL(url).securityOrigin();
-    this._reportView.setSubtitle(this._securityOrigin);
+  _updateOrigin(mainOrigin, unreachableMainOrigin) {
+    if (unreachableMainOrigin) {
+      this._securityOrigin = unreachableMainOrigin;
+      this._reportView.setSubtitle(ls`${unreachableMainOrigin} (failed to load)`);
+    } else {
+      this._securityOrigin = mainOrigin;
+      this._reportView.setSubtitle(mainOrigin);
+    }
+
     this.doUpdate();
   }
 
@@ -196,7 +210,12 @@ Resources.ClearStorageView = class extends UI.ThrottledWidget {
       return;
     }
     this._quotaRow.textContent = Common.UIString(
-        '%s used out of %s storage quota', Number.bytesToString(response.usage), Number.bytesToString(response.quota));
+        '%s used out of %s storage quota.\u00a0', Number.bytesToString(response.usage),
+        Number.bytesToString(response.quota));
+    if (response.quota < 125829120) {  // 120 MB
+      this._quotaRow.title = ls`Storage quota is limited in Incognito mode`;
+      this._quotaRow.appendChild(UI.Icon.create('smallicon-info'));
+    }
 
     if (!this._quotaUsage || this._quotaUsage !== response.usage) {
       this._quotaUsage = response.usage;
